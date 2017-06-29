@@ -15,6 +15,8 @@ Kit and Yeoman.
 ## Stagehand templates
 * `console-full` - A command-line application sample.
 * `package-simple` - A starting point for Dart libraries or applications.
+* `server-aqueduct-full` - A web server built using the aqueduct package.
+* `server-aqueduct-simple` - A simple web server built using the aqueduct package.
 * `server-shelf` - A web server built using the shelf package.
 * `web-angular` - A web app with material design components.
 * `web-simple` - A web app that uses only core Dart libraries.

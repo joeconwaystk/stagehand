@@ -30,6 +30,8 @@ import 'generators/package_simple.dart';
 import 'generators/server_shelf.dart';
 import 'generators/web_angular.dart';
 import 'generators/web_simple.dart';
+import 'generators/server_aqueduct_full.dart';
+import 'generators/server_aqueduct_simple.dart';
 import 'generators/web_stagexl.dart';
 import 'src/common.dart';
 
@@ -40,7 +42,9 @@ final List<Generator> generators = [
   new ServerShelfGenerator(),
   new WebAngularGenerator(),
   new WebSimpleGenerator(),
-  new WebStageXlGenerator()
+  new WebStageXlGenerator(),
+  new ServerAqueductFullGenerator(),
+  new ServerAqueductSimpleGenerator()
 ]..sort();
 
 Generator getGenerator(String id) {
