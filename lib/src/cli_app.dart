@@ -7,12 +7,13 @@ import 'dart:convert' show JSON;
 import 'dart:io' as io;
 import 'dart:math';
 
-import 'package:args/args.dart';
 import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as path;
 import 'package:stagehand/src/common.dart';
 import 'package:stagehand/stagehand.dart';
 import 'package:usage/usage_io.dart';
+
+import 'cli_args.dart';
 
 const String APP_NAME = 'stagehand';
 
@@ -23,6 +24,7 @@ const String APP_VERSION = '1.1.4+1';
 const String _GA_TRACKING_ID = 'UA-55033590-1';
 
 class CliApp {
+
   static final Duration _timeout = const Duration(milliseconds: 500);
 
   final List<Generator> generators;
@@ -44,182 +46,136 @@ class CliApp {
     generators.sort();
   }
 
-  io.Directory get cwd => _cwd != null ? _cwd : io.Directory.current;
+  static final Duration _timeout = const Duration(milliseconds: 500);
+
+  final List<Generator> generators;
+  final CliLogger logger;
+
+  CliArgs options;
+  GeneratorTarget target;
+  Analytics analytics;
+  io.Directory _currentWorkingDirectory;
+
+  io.Directory get currentWorkingDirectory =>
+      _currentWorkingDirectory ?? io.Directory.current;
+
+  String get projectName =>
+      normalizeProjectName(path.basename(currentWorkingDirectory.path));
 
   /**
    * An override for the directory to generate into; public for testing.
    */
-  set cwd(io.Directory value) {
-    _cwd = value;
+  set currentWorkingDirectory(io.Directory value) {
+    _currentWorkingDirectory = value;
   }
 
-  Future process(List<String> args) {
-    ArgParser argParser = _createArgParser();
+  Future process(List<String> args) async {
+    options = new CliArgs(args, logger);
 
-    ArgResults options;
-
-    try {
-      options = argParser.parse(args);
-    } catch (e, st) {
-      // FormatException: Could not find an option named "foo".
-      if (e is FormatException) {
-        _out('Error: ${e.message}');
-        return new Future.error(new ArgError(e.message));
-      } else {
-        return new Future.error(e, st);
-      }
-    }
-
-    if (options.wasParsed('analytics')) {
-      analytics.enabled = options['analytics'];
-      _out("Analytics ${analytics.enabled ? 'enabled' : 'disabled'}.");
-      if (analytics.enabled) analytics.sendScreenView('analytics');
-      return analytics.waitForLastPing(timeout: _timeout);
+    if (options.hasAnalyticsFlag) {
+      return _sendAnalyticsIfAllowed(options);
     }
 
     // This hidden option is used so that our build bots don't emit data.
-    if (options['mock-analytics']) {
+    if (options.shouldMockAnalytics) {
       analytics = new AnalyticsMock();
     }
 
-    if (options['version']) {
-      _out('${APP_NAME} version: ${APP_VERSION}');
-      return http.get(pubVersionURL).then((response) {
-        List versions = JSON.decode(response.body)['versions'];
-        if (APP_VERSION != versions.last) {
-          _out("Version ${versions.last} is available! Run `pub global activate"
-              " ${APP_NAME}` to get the latest.");
-        }
-      }).catchError((e) => null);
+    if (options.shouldDisplayVersion) {
+      return _displayVersion();
     }
 
-    if (options['help'] || args.isEmpty) {
+    if (options.shouldDisplayHelp || args.isEmpty) {
       // Prompt to opt into advanced analytics.
       if (analytics.firstRun) {
-        _out("""
-Welcome to Stagehand! We collect anonymous usage statistics and crash reports in
-order to improve the tool (http://goo.gl/6wsncI). Would you like to opt-in to
-additional analytics to help us improve Stagehand [y/yes/no]?""");
-        io.stdout.flush();
-        String response = io.stdin.readLineSync();
-        response = response.toLowerCase().trim();
-        analytics.enabled = (response == 'y' || response == 'yes');
-        _out('');
+        _promptForAnalyticsPermission();
       }
 
-      _screenView(options['help'] ? 'help' : 'main');
-      _usage(argParser);
+      _screenView(options.shouldDisplayHelp ? 'help' : 'main');
+      _usage(options.usage);
       return analytics.waitForLastPing(timeout: _timeout);
     }
 
-    // The `--machine` option emits the list of available generators to stdout
-    // as Json. This is useful for tools that don't want to have to parse the
-    // output of `--help`. It's an undocumented command line flag, and may go
-    // away or change.
-    if (options['machine']) {
+    if (options.displayAsMachineReadable) {
       _screenView('machine');
       logger.stdout(_createMachineInfo(generators));
       return analytics.waitForLastPing(timeout: _timeout);
     }
 
-    if (options.rest.isEmpty) {
+    if (options.templateIdentifiers.isEmpty) {
       logger.stderr("No generator specified.\n");
-      _usage(argParser);
-      return new Future.error(new ArgError('no generator specified'));
+      _usage(options.usage);
+      throw new ArgError('no generator specified');
     }
 
-    if (options.rest.length >= 2) {
+    if (options.templateIdentifiers.length >= 2) {
       logger.stderr("Error: too many arguments given.\n");
-      _usage(argParser);
-      return new Future.error(new ArgError('invalid generator'));
+      _usage(options.usage);
+      throw new ArgError('invalid generator');
     }
 
-    String generatorName = options.rest.first;
-    Generator generator = _getGenerator(generatorName);
-
-    if (generator == null) {
-      logger.stderr("'${generatorName}' is not a valid generator.\n");
-      _usage(argParser);
-      return new Future.error(new ArgError('invalid generator'));
-    }
-
-    io.Directory dir = cwd;
-
-    if (!options['override'] && !_isDirEmpty(dir)) {
+    if (!options.overrideNonEmptyDirectory &&
+        !_isDirEmpty(currentWorkingDirectory)) {
       logger.stderr(
           'The current directory is not empty. Please create a new project directory, or '
           'use --override to force generation into the current directory.');
-      return new Future.error(new ArgError('project directory not empty'));
+      throw new ArgError('project directory not empty');
     }
 
-    // Normalize the project name.
-    String projectName = path.basename(dir.path);
-    projectName = normalizeProjectName(projectName);
+    var generator = _getGenerator(options.templateIdentifiers.first);
+    return _createProject(generator, options.author);
+  }
 
-    if (target == null) {
-      target = new _DirectoryGeneratorTarget(logger, dir);
-    }
+  Future _createProject(Generator generator, String author) async {
+    target ??= new _DirectoryGeneratorTarget(logger, currentWorkingDirectory);
 
-    _out("Creating ${generatorName} application '${projectName}':");
+    logger.stdout("Creating ${generator.id} application '${projectName}':");
 
     _screenView('create');
-    analytics.sendEvent('create', generatorName, label: generator.description);
-
-    String author = options['author'];
-
-    if (!options.wasParsed('author')) {
-      try {
-        io.ProcessResult result =
-            io.Process.runSync('git', ['config', 'user.name']);
-        if (result.exitCode == 0) author = result.stdout.trim();
-      } catch (exception) {}
-    }
+    analytics.sendEvent('create', generator.id, label: generator.description);
 
     var vars = {'author': author};
 
-    Future f = generator.generate(projectName, target, additionalVars: vars);
-    return f.then((_) {
-      _out("${generator.numFiles()} files written.");
+    await generator.generate(projectName, target, additionalVars: vars);
 
-      String message = generator.getInstallInstructions();
-      if (message != null && message.isNotEmpty) {
-        message = message.trim();
-        message = message.split('\n').map((line) => "--> ${line}").join("\n");
-        _out("\n${message}");
-      }
-    }).then((_) {
-      return analytics.waitForLastPing(timeout: _timeout);
-    });
+    logger.stdout("${generator.numFiles()} files written.");
+
+    var message = generator.getInstallInstructions();
+    if (message != null && message.isNotEmpty) {
+      message = message.trim();
+      message = message.split('\n').map((line) => "--> ${line}").join("\n");
+      logger.stdout("\n${message}");
+    }
+
+    return analytics.waitForLastPing(timeout: _timeout);
   }
 
-  ArgParser _createArgParser() {
-    var argParser = new ArgParser();
+  Future _sendAnalyticsIfAllowed(CliArgs options) {
+    analytics.enabled = options.shouldEnableAnalytics;
+    logger.stdout("Analytics ${analytics.enabled ? 'enabled' : 'disabled'}.");
+    if (analytics.enabled) {
+      analytics.sendScreenView('analytics');
+    }
 
-    argParser.addFlag('analytics',
-        negatable: true,
-        help: 'Opt out of anonymous usage and crash reporting.');
-    argParser.addFlag('help', abbr: 'h', negatable: false, help: 'Help!');
-    argParser.addFlag('version',
-        negatable: false, help: 'Display the version for ${APP_NAME}.');
-    argParser.addOption('author',
-        defaultsTo: '<your name>',
-        help: 'The author name to use for file headers.');
+    return analytics.waitForLastPing(timeout: _timeout);
+  }
 
-    // Really, really generate into the current directory.
-    argParser.addFlag('override', negatable: false, hide: true);
-
-    // Output the list of available projects as json to stdout.
-    argParser.addFlag('machine', negatable: false, hide: true);
-
-    // Mock out analytics - for use on our testing bots.
-    argParser.addFlag('mock-analytics', negatable: false, hide: true);
-
-    return argParser;
+  Future _displayVersion() async {
+    logger.stdout('${APP_NAME} version: ${APP_VERSION}');
+    try {
+      var response = await http.get(pubVersionURL);
+      List versions = JSON.decode(response.body)['versions'];
+      if (APP_VERSION != versions.last) {
+        logger.stdout(
+            "Version ${versions.last} is available! Run `pub global activate"
+            " ${APP_NAME}` to get the latest.");
+      }
+    } catch (_) {}
   }
 
   String _createMachineInfo(List<Generator> generators) {
-    Iterable itor = generators.map((Generator generator) {
-      Map m = {
+    var itor = generators.map((generator) {
+      var m = {
         'name': generator.id,
         'label': generator.label,
         'description': generator.description
@@ -231,33 +187,52 @@ additional analytics to help us improve Stagehand [y/yes/no]?""");
 
       return m;
     });
+
     return JSON.encode(itor.toList());
   }
 
-  void _usage(ArgParser argParser) {
-    _out(
+  void _usage(String usage) {
+    logger.stdout(
         'Stagehand will generate the given application type into the current directory.');
-    _out('');
-    _out('usage: ${APP_NAME} <generator-name>');
-    _out(argParser.usage);
-    _out('');
-    _out('Available generators:');
+    logger.stdout('');
+    logger.stdout('usage: ${APP_NAME} <generator-name>');
+    logger.stdout(usage);
+    logger.stdout('');
+    logger.stdout('Available generators:');
+
     int len = generators.map((g) => g.id.length).fold(0, (a, b) => max(a, b));
+
     generators
-        .map((g) => "  ${_pad(g.id, len)} - ${g.description}")
+        .map((g) => "  ${g.id.padRight(len)} - ${g.description}")
         .forEach(logger.stdout);
   }
 
   Generator _getGenerator(String id) {
-    return generators.firstWhere((g) => g.id == id, orElse: () => null);
+    return generators.firstWhere((g) => g.id == id, orElse: () {
+      logger.stderr("'$id' is not a valid generator.\n");
+      _usage(options.usage);
+      throw new ArgError('invalid generator');
+    });
   }
-
-  void _out(String str) => logger.stdout(str);
 
   void _screenView(String view) {
     // If the user hasn't opted in, only send a version check - no page data.
-    if (!analytics.enabled) view = 'main';
+    if (!analytics.enabled) {
+      view = 'main';
+    }
     analytics.sendScreenView(view);
+  }
+
+  void _promptForAnalyticsPermission() {
+    logger.stdout("""
+Welcome to Stagehand! We collect anonymous usage statistics and crash reports in
+order to improve the tool (http://goo.gl/6wsncI). Would you like to opt-in to
+additional analytics to help us improve Stagehand [y/yes/no]?""");
+    io.stdout.flush();
+    String response = io.stdin.readLineSync();
+    response = response.toLowerCase().trim();
+    analytics.enabled = (response == 'y' || response == 'yes');
+    logger.stdout('');
   }
 
   /**
@@ -303,9 +278,4 @@ class _DirectoryGeneratorTarget extends GeneratorTarget {
         .create(recursive: true)
         .then((_) => file.writeAsBytes(contents));
   }
-}
-
-String _pad(String str, int len) {
-  while (str.length < len) str += ' ';
-  return str;
 }

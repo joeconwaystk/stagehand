@@ -8,8 +8,8 @@ import 'server_aqueduct_full_data.dart';
 class ServerAqueductFullGenerator extends DefaultGenerator {
   ServerAqueductFullGenerator()
       : super('server-aqueduct-full', 'Web Server',
-      'A web server built using the aqueduct package.',
-      categories: const ['dart', 'aqueduct', 'server']) {
+            'A web server built using the aqueduct package.',
+            categories: const ['dart', 'aqueduct', 'server']) {
     for (TemplateFile file in decodeConcatenatedData(data)) {
       addTemplateFile(file);
     }

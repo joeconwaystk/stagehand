@@ -21,7 +21,7 @@ void main() {
       logger = new CliLoggerMock();
       target = new GeneratorTargetMock();
       app = new CliApp(generators, logger, target: target);
-      app.cwd = new Directory('test');
+      app.currentWorkingDirectory = new Directory('test');
       app.analytics = new AnalyticsMock();
     });
 
@@ -88,7 +88,7 @@ void main() {
       logger = new CliLoggerMock();
       target = new GeneratorTargetMock();
       app = new CliApp(generators, logger, target: target, pubVersionURL: 'http://localhost:$mockPort');
-      app.cwd = new Directory('test');
+      app.currentWorkingDirectory = new Directory('test');
       app.analytics = new AnalyticsMock();
     });
 
@@ -112,7 +112,7 @@ void main() {
     });
 
     test("Can't put in directory with other directories", () async {
-      temporaryDirectory = new Directory.fromUri(app.cwd.uri.resolve('tmp/'));
+      temporaryDirectory = new Directory.fromUri(app.currentWorkingDirectory.uri.resolve('tmp/'));
       temporaryDirectory.createSync();
       try {
         await app.process(['package-simple']);
@@ -123,7 +123,7 @@ void main() {
     });
 
     test("Can't put in directory with other directories, unless --override", () async {
-      temporaryDirectory = new Directory.fromUri(app.cwd.uri.resolve('tmp/'));
+      temporaryDirectory = new Directory.fromUri(app.currentWorkingDirectory.uri.resolve('tmp/'));
       temporaryDirectory.createSync();
       await app.process(['--override', 'package-simple']);
 
