@@ -20,7 +20,7 @@ void main() {
     setUp(() {
       logger = new CliLoggerMock();
       target = new GeneratorTargetMock();
-      app = new CliApp(generators, logger, target);
+      app = new CliApp(generators, logger, target: target);
       app.cwd = new Directory('test');
       app.analytics = new AnalyticsMock();
     });
@@ -73,6 +73,62 @@ void main() {
         _expectOk();
         expect(logger.getStdout(), contains('stagehand version'));
       });
+    });
+  });
+
+  group('With mocked services', () {
+    CliApp app;
+    CliLoggerMock logger;
+    GeneratorTargetMock target;
+    HttpServer mockServer;
+    final int mockPort = 7777;
+    Directory temporaryDirectory;
+
+    setUp(() {
+      logger = new CliLoggerMock();
+      target = new GeneratorTargetMock();
+      app = new CliApp(generators, logger, target: target, pubVersionURL: 'http://localhost:$mockPort');
+      app.cwd = new Directory('test');
+      app.analytics = new AnalyticsMock();
+    });
+
+    tearDown(() async {
+      await mockServer?.close();
+      temporaryDirectory?.deleteSync();
+    });
+
+    test('Newer version available shows warning', () async {
+      mockServer = await HttpServer.bind(InternetAddress.LOOPBACK_IP_V4, mockPort);
+      mockServer.listen((req) {
+        req.response.statusCode = 200;
+        req.response.write(JSON.encode({
+          'versions': ['1.0', '10.0']
+        }));
+        req.response.close();
+      });
+
+      await app.process(['--version']);
+      expect(logger.getStdout(), contains('Version 10.0 is available'));
+    });
+
+    test("Can't put in directory with other directories", () async {
+      temporaryDirectory = new Directory.fromUri(app.cwd.uri.resolve('tmp/'));
+      temporaryDirectory.createSync();
+      try {
+        await app.process(['package-simple']);
+        fail('Should not succeed');
+      } on ArgError catch (e) {
+        expect(e.message, contains('project directory not empty'));
+      }
+    });
+
+    test("Can't put in directory with other directories, unless --override", () async {
+      temporaryDirectory = new Directory.fromUri(app.cwd.uri.resolve('tmp/'));
+      temporaryDirectory.createSync();
+      await app.process(['--override', 'package-simple']);
+
+      expect(logger.getStderr(), isEmpty);
+      expect(logger.getStdout(), isNot(isEmpty));
     });
   });
 }

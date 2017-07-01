@@ -19,9 +19,6 @@ const String APP_NAME = 'stagehand';
 // This version must be updated in tandem with the pubspec version.
 const String APP_VERSION = '1.1.4+1';
 
-const String APP_PUB_INFO =
-    'https://pub.dartlang.org/packages/${APP_NAME}.json';
-
 // The Google Analytics tracking ID for stagehand.
 const String _GA_TRACKING_ID = 'UA-55033590-1';
 
@@ -30,12 +27,15 @@ class CliApp {
 
   final List<Generator> generators;
   final CliLogger logger;
+  final String _pubVersionURL;
 
+  String get pubVersionURL => _pubVersionURL ?? 'https://pub.dartlang.org/packages/${APP_NAME}.json';
   GeneratorTarget target;
   Analytics analytics;
   io.Directory _cwd;
 
-  CliApp(this.generators, this.logger, [this.target]) {
+  CliApp(this.generators, this.logger, {this.target, String pubVersionURL})
+  : _pubVersionURL = pubVersionURL {
     assert(generators != null);
     assert(logger != null);
 
@@ -84,7 +84,7 @@ class CliApp {
 
     if (options['version']) {
       _out('${APP_NAME} version: ${APP_VERSION}');
-      return http.get(APP_PUB_INFO).then((response) {
+      return http.get(pubVersionURL).then((response) {
         List versions = JSON.decode(response.body)['versions'];
         if (APP_VERSION != versions.last) {
           _out("Version ${versions.last} is available! Run `pub global activate"
