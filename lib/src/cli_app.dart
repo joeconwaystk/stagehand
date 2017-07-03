@@ -24,20 +24,8 @@ const String APP_VERSION = '1.1.4+1';
 const String _GA_TRACKING_ID = 'UA-55033590-1';
 
 class CliApp {
-
-  static final Duration _timeout = const Duration(milliseconds: 500);
-
-  final List<Generator> generators;
-  final CliLogger logger;
-  final String _pubVersionURL;
-
-  String get pubVersionURL => _pubVersionURL ?? 'https://pub.dartlang.org/packages/${APP_NAME}.json';
-  GeneratorTarget target;
-  Analytics analytics;
-  io.Directory _cwd;
-
   CliApp(this.generators, this.logger, {this.target, String pubVersionURL})
-  : _pubVersionURL = pubVersionURL {
+      : _pubVersionURL = pubVersionURL {
     assert(generators != null);
     assert(logger != null);
 
@@ -50,10 +38,13 @@ class CliApp {
 
   final List<Generator> generators;
   final CliLogger logger;
+  final String _pubVersionURL;
 
-  CliArgs options;
+  String get pubVersionURL => _pubVersionURL ?? 'https://pub.dartlang.org/packages/${APP_NAME}.json';
   GeneratorTarget target;
   Analytics analytics;
+
+  CliArgs options;
   io.Directory _currentWorkingDirectory;
 
   io.Directory get currentWorkingDirectory =>
